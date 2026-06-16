@@ -143,13 +143,15 @@ body::after {
 
 <script>
 // ══════════════════════════════════════════════════════════════ DATA
+// Real experimental results — 5 seeds (0-4), TensorFlow/Keras MLPs
 const RESULTS = {
-  iris:  { "Grid Search":{acc:100.00,std:0.00,evals:108}, "Random Search":{acc:100.00,std:0.00,evals:20}, "Bayesian Opt":{acc:100.00,std:0.00,evals:20}, "DP-HPO":{acc:100.00,std:0.00,evals:10} },
-  heart: { "Grid Search":{acc:91.11,std:2.08,evals:108},  "Random Search":{acc:90.00,std:1.36,evals:20},  "Bayesian Opt":{acc:88.89,std:2.83,evals:20},  "DP-HPO":{acc:87.78,std:1.57,evals:10} },
-  mnist: { "Grid Search":{acc:94.33,std:0.20,evals:108},  "Random Search":{acc:93.52,std:0.26,evals:20},  "Bayesian Opt":{acc:93.73,std:0.45,evals:20},  "DP-HPO":{acc:92.87,std:0.39,evals:10} },
+  iris:   { "Grid Search":{acc:99.33,std:1.33,evals:108}, "Random Search":{acc:99.33,std:1.33,evals:20}, "Bayesian Opt":{acc:99.33,std:1.33,evals:19.8}, "Optuna":{acc:98.67,std:2.67,evals:16.4}, "DP-HPO":{acc:98.67,std:2.67,evals:10} },
+  heart:  { "Grid Search":{acc:89.67,std:2.67,evals:108}, "Random Search":{acc:87.33,std:2.26,evals:20},  "Bayesian Opt":{acc:88.33,std:3.94,evals:19.8}, "Optuna":{acc:89.00,std:2.91,evals:16.0}, "DP-HPO":{acc:87.00,std:2.87,evals:10} },
+  mnist:  { "Grid Search":{acc:94.49,std:0.44,evals:108}, "Random Search":{acc:93.58,std:0.55,evals:20},  "Bayesian Opt":{acc:94.68,std:0.52,evals:19.6}, "Optuna":{acc:94.17,std:0.33,evals:14.4}, "DP-HPO":{acc:93.10,std:0.90,evals:10} },
+  breast: { "Grid Search":{acc:98.95,std:0.35,evals:108}, "Random Search":{acc:98.77,std:0.43,evals:20},  "Bayesian Opt":{acc:98.77,std:0.43,evals:19.8}, "Optuna":{acc:98.77,std:0.43,evals:16.4}, "DP-HPO":{acc:98.60,std:0.70,evals:10} },
 };
 
-const DS_NAMES = { iris:'UCI Iris', heart:'UCI Heart Disease', mnist:'MNIST (10K)' };
+const DS_NAMES = { iris:'UCI Iris', heart:'UCI Heart Disease', mnist:'MNIST (10K)', breast:'UCI Breast Cancer' };
 
 const ALGO_STEPS = [
   { dim:'hidden_layers', vals:['1','2','3'],               accs:[83.3,87.2,85.0], best_i:1, best_v:'2',   commit:'layers=2' },
@@ -202,7 +204,7 @@ const BOOT_LINES = [
   { t:400, text:'  Mounting search space       [108 configs] ........ OK', cls:'' },
   { t:530, text:'  Initializing memo table     [∅]  .................. OK', cls:'' },
   { t:660, text:'  Loading TensorFlow/Keras    [v2.x CPU mode]  ...... OK', cls:'' },
-  { t:800, text:'  Starting experiment daemon  [seeds: 0,1,2]  ....... OK', cls:'' },
+  { t:800, text:'  Starting experiment daemon  [seeds: 0,1,2,3,4] ... OK', cls:'' },
   { t:900, text:'  Fetching view counter       [countapi]  ........... OK', cls:'' },
   { t:950, text:'', cls:'' },
   { t:980, text:'┌──────────────────────────────────────────────────────────────┐', cls:'c-bright' },
@@ -266,8 +268,8 @@ function help() {
   printRaw(`<span class="c-header"> AVAILABLE COMMANDS </span>
 
 <span class="c-cyan">about</span>              Show paper information
-<span class="c-cyan">run [dataset]</span>      Simulate all 4 HPO methods  (iris | heart | mnist)
-<span class="c-cyan">results [dataset]</span>  Print full results table    (iris | heart | mnist | all)
+<span class="c-cyan">run [dataset]</span>      Simulate all 5 HPO methods  (iris | heart | mnist | breast)
+<span class="c-cyan">results [dataset]</span>  Print full results table    (iris | heart | mnist | breast | all)
 <span class="c-cyan">algo</span>               Walk through DP-HPO algorithm step by step
 <span class="c-cyan">space</span>              Visualise the 108-config search space
 <span class="c-cyan">compare</span>            ASCII bar chart: accuracy vs evaluations
@@ -284,27 +286,30 @@ function help() {
 function about() {
   printRaw(`<span class="c-bright">Title  :</span> A Dynamic Programming Framework for Neural Network
           Hyperparameter Optimisation
-<span class="c-bright">Author :</span> Kush Sonawane
+<span class="c-bright">Author :</span> Kartik Sonawane (Independent Researcher)
 <span class="c-bright">GitHub :</span> <span class="c-cyan">github.com/kartikjsonawane/dp-hpo</span>
 <span class="c-bright">Method :</span> Greedy dimension-by-dimension DP with memoisation
 <span class="c-bright">Space  :</span> hidden_layers × neurons × lr × activation = 3×4×3×3 = <span class="c-warn">108</span> configs
 <span class="c-bright">DP-HPO :</span> finds competitive config in <span class="c-bright">10 evaluations</span> (<span class="c-bright">90.7%</span> reduction)
+<span class="c-bright">Baselines:</span> Grid Search, Random Search, Bayesian Opt, Optuna (TPE)
+<span class="c-bright">Datasets :</span> UCI Iris, Heart Disease, MNIST (10K), Breast Cancer
+<span class="c-bright">Seeds  :</span> 5 (0–4), Wilcoxon signed-rank significance testing
 <span class="c-bright">Models :</span> TensorFlow/Keras Sequential MLPs, Adam, early stopping
-<span class="c-bright">HW     :</span> CPU only (Intel x86-64, no GPU required)`);
+<span class="c-bright">Result :</span> All comparisons non-significant (p &gt; 0.05), 90.7% eval reduction`);
 }
 
 // ── LS ──
 function ls() {
-  printRaw(`<span class="c-cyan">total 8 files</span>
-drwxr-xr-x  kush  <span class="c-bright">.</span>
-drwxr-xr-x  kush  <span class="c-bright">..</span>
--rw-r--r--  kush  <span class="c-orange">DP_HPO_Draft_v4.docx</span>      (paper draft, Keras results)
--rwxr-xr-x  kush  <span class="c-bright">dp_hpo.py</span>                  (core algorithm — 4 HPO methods)
--rwxr-xr-x  kush  <span class="c-bright">run_experiments.py</span>         (reproduce paper results)
--rwxr-xr-x  kush  <span class="c-bright">plot_convergence.py</span>        (generate figures)
--rw-r--r--  kush  <span class="c-cyan">README.md</span>                  (documentation)
--rw-r--r--  kush  <span class="c-orange">convergence_curve.png</span>      (Figure 1)
--rw-r--r--  kush  <span class="c-dim">results.json</span>               (experimental results)`);
+  printRaw(`<span class="c-cyan">total 9 files</span>
+drwxr-xr-x  kartik  <span class="c-bright">.</span>
+drwxr-xr-x  kartik  <span class="c-bright">..</span>
+-rw-r--r--  kartik  <span class="c-orange">DP_HPO_Final_Paper.docx</span>   (publication-ready paper)
+-rwxr-xr-x  kartik  <span class="c-bright">dp_hpo.py</span>                  (5 HPO methods incl. Optuna)
+-rwxr-xr-x  kartik  <span class="c-bright">run_experiments.py</span>         (5 seeds, 4 datasets, Wilcoxon)
+-rwxr-xr-x  kartik  <span class="c-bright">plot_convergence.py</span>        (generate figures)
+-rw-r--r--  kartik  <span class="c-cyan">README.md</span>                  (documentation)
+-rw-r--r--  kartik  <span class="c-orange">convergence_curve.png</span>      (Figure 1)
+-rw-r--r--  kartik  <span class="c-bright">results.json</span>               (4 datasets × 5 methods × 5 seeds)`);
 }
 
 // ── CLEAR ──
@@ -312,17 +317,19 @@ function clear() { out.innerHTML = ''; }
 
 // ── NEOFETCH ──
 function neofetch() {
-  printRaw(`<span class="c-bright">        .---.</span>        <span class="c-white">kush</span><span class="c-dim">@</span><span class="c-bright">dp-hpo</span>
-<span class="c-bright">       /     \\</span>       <span class="c-dim">──────────────────────</span>
-<span class="c-bright">      | () () |</span>      <span class="c-cyan">OS</span>:      Ubuntu 22.04 LTS
-<span class="c-bright">       \\  ^  /</span>       <span class="c-cyan">Kernel</span>:  DP-HPO 1.0.0
-<span class="c-bright">        |||||</span>        <span class="c-cyan">CPU</span>:     Intel x86-64 (no GPU)
-<span class="c-bright">        |||||</span>        <span class="c-cyan">Python</span>:  3.12
-                      <span class="c-cyan">TF</span>:      2.x (CPU mode)
-                      <span class="c-cyan">Shell</span>:   dp-hpo-bash 1.0
-                      <span class="c-cyan">Configs</span>: 108 total, 10 evaluated
-                      <span class="c-cyan">Evals</span>:   90.7% reduction
-                      <span class="c-cyan">Views</span>:   <span class="live-views c-warn">...</span>
+  printRaw(`<span class="c-bright">        .---.</span>        <span class="c-white">kartik</span><span class="c-dim">@</span><span class="c-bright">dp-hpo</span>
+<span class="c-bright">       /     \\</span>       <span class="c-dim">──────────────────────────</span>
+<span class="c-bright">      | () () |</span>      <span class="c-cyan">OS</span>:       Ubuntu 22.04 LTS
+<span class="c-bright">       \\  ^  /</span>       <span class="c-cyan">Kernel</span>:   DP-HPO 2.0.0
+<span class="c-bright">        |||||</span>        <span class="c-cyan">CPU</span>:      Intel x86-64
+<span class="c-bright">        |||||</span>        <span class="c-cyan">Python</span>:   3.12
+                      <span class="c-cyan">TF</span>:       2.x (Keras MLPs)
+                      <span class="c-cyan">Shell</span>:    dp-hpo-bash 2.0
+                      <span class="c-cyan">Datasets</span>: 4 (Iris, Heart, MNIST, Breast)
+                      <span class="c-cyan">Methods</span>:  5 (Grid/Rand/Bayes/Optuna/DP-HPO)
+                      <span class="c-cyan">Seeds</span>:    5 (Wilcoxon p &gt; 0.05, all ns)
+                      <span class="c-cyan">Evals</span>:    90.7% reduction vs grid search
+                      <span class="c-cyan">Views</span>:    <span class="live-views c-warn">...</span>
                       <span class="c-bright">████</span><span class="c-warn">████</span><span class="c-err">████</span><span class="c-cyan">████</span>`);
 }
 
@@ -335,13 +342,14 @@ function run(args) {
   inp.disabled = true;
 
   printLine(`Running all HPO methods on <span class="c-warn">${name}</span> ...`);
-  printLine(`Seeds: [0, 1, 2]  |  Model: Keras Sequential MLP  |  Device: CPU`);
+  printLine(`Seeds: [0,1,2,3,4]  |  Model: Keras Sequential MLP  |  Device: CPU`);
   printLine(`${'─'.repeat(64)}`);
 
   const methods = [
     { key:'Grid Search',  label:'Grid Search  ', cls:'bar-grid',  totalEvals:108, speed:2.5 },
     { key:'Random Search',label:'Random Search ', cls:'bar-rand',  totalEvals:20,  speed:12  },
     { key:'Bayesian Opt', label:'Bayesian Opt  ', cls:'bar-bayes', totalEvals:20,  speed:10  },
+    { key:'Optuna',       label:'Optuna (TPE)  ', cls:'c-magenta', totalEvals:20,  speed:11  },
     { key:'DP-HPO',       label:'DP-HPO        ', cls:'bar-dp',    totalEvals:10,  speed:18  },
   ];
 
@@ -400,20 +408,21 @@ function run(args) {
 // ── RESULTS TABLE ──
 function results(args) {
   const which = args[0] || 'all';
-  const datasets = which === 'all' ? ['iris','heart','mnist'] : (RESULTS[which] ? [which] : ['iris','heart','mnist']);
+  const datasets = which === 'all' ? ['iris','heart','mnist','breast'] : (RESULTS[which] ? [which] : ['iris','heart','mnist','breast']);
 
   datasets.forEach(ds => {
     const data = RESULTS[ds];
     const name = DS_NAMES[ds];
-    printLine(`${'═'.repeat(56)}`);
+    printLine(`${'═'.repeat(60)}`);
     printRaw(`  <span class="c-header"> ${name} </span>`);
-    printLine(`${'─'.repeat(56)}`);
-    printRaw(`  <span class="c-dim">METHOD           ACC (%)       STD    EVALS  REDUC.</span>`);
-    printLine(`${'─'.repeat(56)}`);
+    printLine(`${'─'.repeat(60)}`);
+    printRaw(`  <span class="c-dim">METHOD            ACC (%)       STD    EVALS  REDUC.</span>`);
+    printLine(`${'─'.repeat(60)}`);
     const entries = [
       { label:'Grid Search   ', key:'Grid Search',  cls:'bar-grid'  },
       { label:'Random Search ', key:'Random Search', cls:'bar-rand'  },
       { label:'Bayesian Opt  ', key:'Bayesian Opt',  cls:'bar-bayes' },
+      { label:'Optuna (TPE)  ', key:'Optuna',        cls:'c-magenta' },
       { label:'DP-HPO        ', key:'DP-HPO',        cls:'bar-dp'    },
     ];
     entries.forEach(e => {
@@ -421,11 +430,11 @@ function results(args) {
       const reduc = r.evals < 108 ? `-${((108-r.evals)/108*100).toFixed(0)}%` : ' —  ';
       const isDp = e.key === 'DP-HPO';
       const highlight = isDp ? 'c-bright' : '';
-      printRaw(`  <span class="${e.cls}">${e.label}</span>  <span class="${highlight}">${r.acc.toFixed(2).padStart(6)}%</span>   ±${r.std.toFixed(2).padEnd(5)}  ${String(r.evals).padStart(3)}    <span class="${highlight}">${reduc}</span>`);
+      printRaw(`  <span class="${e.cls}">${e.label}</span>  <span class="${highlight}">${r.acc.toFixed(2).padStart(6)}%</span>   ±${r.std.toFixed(2).padEnd(5)}  ${String(r.evals).padStart(5)}    <span class="${highlight}">${reduc}</span>`);
     });
   });
-  printLine(`${'═'.repeat(56)}`);
-  printLine(`<span class="c-dim">Accuracy = mean ± std across 3 seeds (0,1,2)</span>`);
+  printLine(`${'═'.repeat(60)}`);
+  printLine(`<span class="c-dim">Accuracy = mean ± std across 5 seeds (0–4). All Wilcoxon p > 0.05 (ns).</span>`);
 }
 
 // ── ALGO (step through) ──
@@ -550,12 +559,13 @@ function compare() {
   printRaw(`<span class="c-bright">Accuracy vs Evaluations — All Datasets</span>`);
   printLine(`${'─'.repeat(64)}`);
 
-  const datasets = ['iris','heart','mnist'];
+  const datasets = ['iris','heart','mnist','breast'];
   const methods  = [
-    { key:'Grid Search',  label:'Grid ', cls:'bar-grid'  },
-    { key:'Random Search',label:'Rand  ', cls:'bar-rand'  },
-    { key:'Bayesian Opt', label:'Bayes ', cls:'bar-bayes' },
-    { key:'DP-HPO',       label:'DP-HPO', cls:'bar-dp'    },
+    { key:'Grid Search',  label:'Grid  ', cls:'bar-grid'  },
+    { key:'Random Search',label:'Rand   ', cls:'bar-rand'  },
+    { key:'Bayesian Opt', label:'Bayes  ', cls:'bar-bayes' },
+    { key:'Optuna',       label:'Optuna ', cls:'c-magenta' },
+    { key:'DP-HPO',       label:'DP-HPO ', cls:'bar-dp'    },
   ];
 
   datasets.forEach(ds => {
@@ -565,16 +575,16 @@ function compare() {
     const maxAcc = Math.max(...methods.map(m => data[m.key].acc));
     methods.forEach(m => {
       const r = data[m.key];
-      const barLen = Math.round((r.acc - (maxAcc - 15)) / 15 * 30);
+      const barLen = Math.round((r.acc - (maxAcc - 10)) / 10 * 28);
       const bar = '█'.repeat(Math.max(1, barLen));
       const isDp = m.key === 'DP-HPO';
-      printRaw(`  <span class="${m.cls}">${m.label}</span>  <span class="${m.cls}">${bar.padEnd(32)}</span> <span class="${isDp?'c-bright':'c-white'}">${r.acc.toFixed(2)}% ±${r.std.toFixed(2)}</span>  [${r.evals} evals]${isDp?' <span class="c-bright">★</span>':''}`);
+      printRaw(`  <span class="${m.cls}">${m.label}</span>  <span class="${m.cls}">${bar.padEnd(30)}</span> <span class="${isDp?'c-bright':'c-white'}">${r.acc.toFixed(2)}% ±${r.std.toFixed(2)}</span>  [${r.evals} evals]${isDp?' <span class="c-bright">★</span>':''}`);
     });
   });
 
   printLine(`\n${'─'.repeat(64)}`);
-  printLine(`<span class="c-bright">★ DP-HPO</span>: 90.7% fewer evaluations than grid search with competitive accuracy.`);
-  printLine(`   Accuracy gap: <span class="c-bright">1.47pp</span> (MNIST), <span class="c-bright">3.33pp</span> (Heart Disease)`);
+  printLine(`<span class="c-bright">★ DP-HPO</span>: 90.7% fewer evaluations. All accuracy gaps non-significant (Wilcoxon p > 0.05).`);
+  printLine(`   Datasets: UCI Iris, Heart Disease, MNIST (10K), Breast Cancer | Seeds: 5`);
 }
 
 // ══════════════════════════════════════════════════════════════ INPUT HANDLER
