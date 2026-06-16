@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>DP-HPO Terminal</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0a0a0a;
+  color: #33ff33;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── TITLE BAR ── */
+#titlebar {
+  background: #33ff33;
+  color: #000;
+  padding: 2px 8px;
+  font-weight: bold;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+  border-bottom: 2px solid #33ff33;
+}
+#titlebar .btns { display: flex; gap: 6px; }
+#titlebar .btn-t {
+  width: 14px; height: 14px;
+  background: #000;
+  color: #33ff33;
+  border: 1px solid #33ff33;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+/* ── SCANLINES overlay ── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.08) 2px,
+    rgba(0,0,0,0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ── OUTPUT AREA ── */
+#output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.45;
+  scrollbar-width: thin;
+  scrollbar-color: #33ff33 #000;
+}
+#output::-webkit-scrollbar { width: 6px; }
+#output::-webkit-scrollbar-track { background: #000; }
+#output::-webkit-scrollbar-thumb { background: #33ff33; }
+
+/* ── INPUT LINE ── */
+#input-area {
+  flex-shrink: 0;
+  border-top: 1px solid #33ff33;
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #050505;
+}
+#prompt { color: #33ff33; white-space: nowrap; user-select: none; }
+#cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #33ff33;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 14px;
+  caret-color: #33ff33;
+}
+
+/* ── TEXT COLORS ── */
+.c-dim    { color: #1a7a1a; }
+.c-bright { color: #aaffaa; }
+.c-warn   { color: #ffff00; }
+.c-err    { color: #ff4444; }
+.c-cyan   { color: #00ffff; }
+.c-white  { color: #ffffff; }
+.c-magenta{ color: #ff44ff; }
+.c-orange { color: #ff8800; }
+.c-header { color: #000; background: #33ff33; padding: 0 2px; }
+
+/* ── PROGRESS BAR COLORS ── */
+.bar-grid  { color: #ff4444; }
+.bar-rand  { color: #ffff00; }
+.bar-bayes { color: #aa44ff; }
+.bar-dp    { color: #33ff33; }
+
+/* ── BLINK ── */
+@keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+.blink { animation: blink 1s infinite; }
+
+/* ── GLOW ── */
+#output, #cmd-input, #prompt {
+  text-shadow: 0 0 6px #33ff3366;
+}
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+  <span>● dp-hpo-terminal — bash — 120×40</span>
+  <div class="btns">
+    <div class="btn-t">_</div>
+    <div class="btn-t">□</div>
+    <div class="btn-t" onclick="window.close()">✕</div>
+  </div>
+</div>
+
+<div id="output"></div>
+
+<div id="input-area">
+  <span id="prompt">kartik@dp-hpo:~$&nbsp;</span>
+  <input id="cmd-input" type="text" autocomplete="off" spellcheck="false" autofocus/>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════ DATA
+const RESULTS = {
+  iris:  { "Grid Search":{acc:100.00,std:0.00,evals:108}, "Random Search":{acc:100.00,std:0.00,evals:20}, "Bayesian Opt":{acc:100.00,std:0.00,evals:20}, "DP-HPO":{acc:100.00,std:0.00,evals:10} },
+  heart: { "Grid Search":{acc:91.11,std:2.08,evals:108},  "Random Search":{acc:90.00,std:1.36,evals:20},  "Bayesian Opt":{acc:88.89,std:2.83,evals:20},  "DP-HPO":{acc:87.78,std:1.57,evals:10} },
+  mnist: { "Grid Search":{acc:94.33,std:0.20,evals:108},  "Random Search":{acc:93.52,std:0.26,evals:20},  "Bayesian Opt":{acc:93.73,std:0.45,evals:20},  "DP-HPO":{acc:92.87,std:0.39,evals:10} },
+};
+
+const DS_NAMES = { iris:'UCI Iris', heart:'UCI Heart Disease', mnist:'MNIST (10K)' };
+
+const ALGO_STEPS = [
+  { dim:'hidden_layers', vals:['1','2','3'],               accs:[83.3,87.2,85.0], best_i:1, best_v:'2',   commit:'layers=2' },
+  { dim:'neurons',       vals:['32','64','128','256'],      accs:[82.1,87.2,87.8,86.5], best_i:2, best_v:'128', commit:'neurons=128' },
+  { dim:'learning_rate', vals:['0.001','0.01','0.1'],       accs:[85.1,87.8,78.3], best_i:1, best_v:'0.01', commit:'lr=0.01' },
+  { dim:'activation',    vals:['relu','tanh','logistic'],   accs:[87.8,86.5,84.5], best_i:0, best_v:'relu', commit:'activation=relu' },
+];
+
+// ══════════════════════════════════════════════════════════════ TERMINAL
+const out = document.getElementById('output');
+const inp = document.getElementById('cmd-input');
+let history = [], histIdx = -1, busy = false;
+
+function print(html) {
+  out.innerHTML += html + '\n';
+  out.scrollTop = out.scrollHeight;
+}
+
+function printLine(text, cls='') {
+  const span = cls ? `<span class="${cls}">${text}</span>` : text;
+  print(span);
+}
+
+function printRaw(html) { print(html); }
+
+// ══════════════════════════════════════════════════════════════ VIEW COUNTER
+let viewCount = '...';
+
+async function fetchViewCount() {
+  try {
+    const r = await fetch('https://api.countapi.xyz/hit/kartikjsonawane-dp-hpo/views');
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    viewCount = d.value.toLocaleString();
+  } catch {
+    // fallback: use localStorage for session-local count
+    const local = parseInt(localStorage.getItem('dp-hpo-views') || '0') + 1;
+    localStorage.setItem('dp-hpo-views', local);
+    viewCount = local + ' (local)';
+  }
+  // update any live view elements already in DOM
+  document.querySelectorAll('.live-views').forEach(el => el.textContent = viewCount);
+}
+
+// ══════════════════════════════════════════════════════════════ BOOT
+const BOOT_LINES = [
+  { t:0,   text:'BIOS v2.6.1  OK', cls:'c-dim' },
+  { t:120, text:'Detecting hardware...  CPU: Intel x86-64  RAM: OK', cls:'c-dim' },
+  { t:250, text:'Loading DP-HPO kernel [dp-hpo-1.0.0]...', cls:'' },
+  { t:400, text:'  Mounting search space       [108 configs] ........ OK', cls:'' },
+  { t:530, text:'  Initializing memo table     [∅]  .................. OK', cls:'' },
+  { t:660, text:'  Loading TensorFlow/Keras    [v2.x CPU mode]  ...... OK', cls:'' },
+  { t:800, text:'  Starting experiment daemon  [seeds: 0,1,2]  ....... OK', cls:'' },
+  { t:900, text:'  Fetching view counter       [countapi]  ........... OK', cls:'' },
+  { t:950, text:'', cls:'' },
+  { t:980, text:'┌──────────────────────────────────────────────────────────────┐', cls:'c-bright' },
+  { t:980, text:'│  <span class="c-header"> DP-HPO Terminal v1.0 </span>  Dynamic Programming HPO Framework  │', cls:'c-bright' },
+  { t:980, text:'│  Paper: "A Dynamic Programming Framework for Neural Network  │', cls:'c-bright' },
+  { t:980, text:'│         Hyperparameter Optimisation"                         │', cls:'c-bright' },
+  { t:980, text:'│  GitHub: github.com/kartikjsonawane/dp-hpo                   │', cls:'c-bright' },
+  { t:980, text:'│  Views:  <span class="live-views c-warn">...</span>                                              │', cls:'c-bright' },
+  { t:980, text:'└──────────────────────────────────────────────────────────────┘', cls:'c-bright' },
+  { t:1100,text:'', cls:'' },
+  { t:1100,text:'Type <span class="c-cyan">help</span> to see available commands.', cls:'' },
+  { t:1100,text:'', cls:'' },
+];
+
+function boot() {
+  busy = true;
+  inp.disabled = true;
+  fetchViewCount();
+  BOOT_LINES.forEach(l => {
+    setTimeout(() => {
+      printRaw(l.cls ? `<span class="${l.cls}">${l.text}</span>` : l.text);
+    }, l.t);
+  });
+  setTimeout(() => { busy = false; inp.disabled = false; inp.focus(); }, 1200);
+}
+
+// ══════════════════════════════════════════════════════════════ COMMANDS
+const COMMANDS = {
+  help, about, run, results, algo, space, compare, ls, clear,
+  cls: clear,
+  exit: () => printLine('logout\nConnection to dp-hpo closed.', 'c-dim'),
+  neofetch,
+  views: async () => {
+    printLine('Fetching live view count...', 'c-dim');
+    await fetchViewCount();
+    printRaw(`<span class="c-bright">Live page views:</span> <span class="c-warn live-views">${viewCount}</span>`);
+    printLine('Counter updates on every page load.', 'c-dim');
+  },
+};
+
+function handleCmd(raw) {
+  const line = raw.trim();
+  if (!line) return;
+  history.unshift(line);
+  histIdx = -1;
+  printRaw(`<span class="c-dim">kartik@dp-hpo:~$</span> <span class="c-white">${escHtml(line)}</span>`);
+  const [cmd, ...args] = line.toLowerCase().split(/\s+/);
+  if (COMMANDS[cmd]) {
+    COMMANDS[cmd](args);
+  } else {
+    printLine(`bash: ${escHtml(cmd)}: command not found`, 'c-err');
+    printLine(`Type <span class="c-cyan">help</span> for available commands.`);
+  }
+  printLine('');
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── HELP ──
+function help() {
+  printRaw(`<span class="c-header"> AVAILABLE COMMANDS </span>
+
+<span class="c-cyan">about</span>              Show paper information
+<span class="c-cyan">run [dataset]</span>      Simulate all 4 HPO methods  (iris | heart | mnist)
+<span class="c-cyan">results [dataset]</span>  Print full results table    (iris | heart | mnist | all)
+<span class="c-cyan">algo</span>               Walk through DP-HPO algorithm step by step
+<span class="c-cyan">space</span>              Visualise the 108-config search space
+<span class="c-cyan">compare</span>            ASCII bar chart: accuracy vs evaluations
+<span class="c-cyan">views</span>              Show live page view count
+<span class="c-cyan">neofetch</span>           System information
+<span class="c-cyan">ls</span>                 List project files
+<span class="c-cyan">clear</span>              Clear terminal
+<span class="c-cyan">exit</span>               Close session
+
+<span class="c-dim">Tip: use ↑↓ arrow keys for command history</span>`);
+}
+
+// ── ABOUT ──
+function about() {
+  printRaw(`<span class="c-bright">Title  :</span> A Dynamic Programming Framework for Neural Network
+          Hyperparameter Optimisation
+<span class="c-bright">Author :</span> Kush Sonawane
+<span class="c-bright">GitHub :</span> <span class="c-cyan">github.com/kartikjsonawane/dp-hpo</span>
+<span class="c-bright">Method :</span> Greedy dimension-by-dimension DP with memoisation
+<span class="c-bright">Space  :</span> hidden_layers × neurons × lr × activation = 3×4×3×3 = <span class="c-warn">108</span> configs
+<span class="c-bright">DP-HPO :</span> finds competitive config in <span class="c-bright">10 evaluations</span> (<span class="c-bright">90.7%</span> reduction)
+<span class="c-bright">Models :</span> TensorFlow/Keras Sequential MLPs, Adam, early stopping
+<span class="c-bright">HW     :</span> CPU only (Intel x86-64, no GPU required)`);
+}
+
+// ── LS ──
+function ls() {
+  printRaw(`<span class="c-cyan">total 8 files</span>
+drwxr-xr-x  kush  <span class="c-bright">.</span>
+drwxr-xr-x  kush  <span class="c-bright">..</span>
+-rw-r--r--  kush  <span class="c-orange">DP_HPO_Draft_v4.docx</span>      (paper draft, Keras results)
+-rwxr-xr-x  kush  <span class="c-bright">dp_hpo.py</span>                  (core algorithm — 4 HPO methods)
+-rwxr-xr-x  kush  <span class="c-bright">run_experiments.py</span>         (reproduce paper results)
+-rwxr-xr-x  kush  <span class="c-bright">plot_convergence.py</span>        (generate figures)
+-rw-r--r--  kush  <span class="c-cyan">README.md</span>                  (documentation)
+-rw-r--r--  kush  <span class="c-orange">convergence_curve.png</span>      (Figure 1)
+-rw-r--r--  kush  <span class="c-dim">results.json</span>               (experimental results)`);
+}
+
+// ── CLEAR ──
+function clear() { out.innerHTML = ''; }
+
+// ── NEOFETCH ──
+function neofetch() {
+  printRaw(`<span class="c-bright">        .---.</span>        <span class="c-white">kush</span><span class="c-dim">@</span><span class="c-bright">dp-hpo</span>
+<span class="c-bright">       /     \\</span>       <span class="c-dim">──────────────────────</span>
+<span class="c-bright">      | () () |</span>      <span class="c-cyan">OS</span>:      Ubuntu 22.04 LTS
+<span class="c-bright">       \\  ^  /</span>       <span class="c-cyan">Kernel</span>:  DP-HPO 1.0.0
+<span class="c-bright">        |||||</span>        <span class="c-cyan">CPU</span>:     Intel x86-64 (no GPU)
+<span class="c-bright">        |||||</span>        <span class="c-cyan">Python</span>:  3.12
+                      <span class="c-cyan">TF</span>:      2.x (CPU mode)
+                      <span class="c-cyan">Shell</span>:   dp-hpo-bash 1.0
+                      <span class="c-cyan">Configs</span>: 108 total, 10 evaluated
+                      <span class="c-cyan">Evals</span>:   90.7% reduction
+                      <span class="c-cyan">Views</span>:   <span class="live-views c-warn">...</span>
+                      <span class="c-bright">████</span><span class="c-warn">████</span><span class="c-err">████</span><span class="c-cyan">████</span>`);
+}
+
+// ── RUN (animated) ──
+function run(args) {
+  const ds = args[0] && RESULTS[args[0]] ? args[0] : 'heart';
+  const data = RESULTS[ds];
+  const name = DS_NAMES[ds];
+  busy = true;
+  inp.disabled = true;
+
+  printLine(`Running all HPO methods on <span class="c-warn">${name}</span> ...`);
+  printLine(`Seeds: [0, 1, 2]  |  Model: Keras Sequential MLP  |  Device: CPU`);
+  printLine(`${'─'.repeat(64)}`);
+
+  const methods = [
+    { key:'Grid Search',  label:'Grid Search  ', cls:'bar-grid',  totalEvals:108, speed:2.5 },
+    { key:'Random Search',label:'Random Search ', cls:'bar-rand',  totalEvals:20,  speed:12  },
+    { key:'Bayesian Opt', label:'Bayesian Opt  ', cls:'bar-bayes', totalEvals:20,  speed:10  },
+    { key:'DP-HPO',       label:'DP-HPO        ', cls:'bar-dp',    totalEvals:10,  speed:18  },
+  ];
+
+  // Reserve lines
+  const startLine = out.innerHTML.split('\n').length;
+  const lineIds = methods.map((m, i) => {
+    const id = 'run-line-' + i;
+    printRaw(`<span id="${id}"><span class="${m.cls}">${m.label}</span> [<span class="c-dim">${'·'.repeat(20)}</span>]    0/${m.totalEvals} evals</span>`);
+    return id;
+  });
+
+  let done = 0;
+  const finishLine = () => {
+    done++;
+    if (done === methods.length) {
+      setTimeout(() => {
+        printLine(`${'─'.repeat(64)}`);
+        printRaw(`<span class="c-bright">DONE.</span> Results:`);
+        methods.forEach(m => {
+          const r = data[m.key];
+          const bar = '█'.repeat(Math.round(r.acc/5 - 16));
+          const isDp = m.key === 'DP-HPO';
+          printRaw(`  <span class="${m.cls}">${m.label}</span>  acc=<span class="${isDp?'c-bright':'c-white'}">${r.acc.toFixed(2)}%</span>  evals=<span class="${isDp?'c-bright':'c-white'}">${r.evals}</span>${isDp?' <span class="c-bright">← 90.7% fewer than grid search</span>':''}`);
+        });
+        busy = false;
+        inp.disabled = false;
+        inp.focus();
+      }, 400);
+    }
+  };
+
+  methods.forEach((m, i) => {
+    let cur = 0;
+    const BAR = 20;
+    const interval = setInterval(() => {
+      const step = Math.max(1, Math.floor(m.totalEvals / (BAR * m.speed)));
+      cur = Math.min(cur + step, m.totalEvals);
+      const filled = Math.round(cur / m.totalEvals * BAR);
+      const empty  = BAR - filled;
+      const bar = '█'.repeat(filled) + '·'.repeat(empty);
+      const pct = (cur / m.totalEvals * 100).toFixed(0).padStart(3);
+      const el = document.getElementById(lineIds[i]);
+      if (el) {
+        el.innerHTML = `<span class="${m.cls}">${m.label}</span> [<span class="${m.cls}">${bar}</span>] ${pct}%  ${cur}/${m.totalEvals} evals`;
+      }
+      if (cur >= m.totalEvals) {
+        clearInterval(interval);
+        const r = data[m.key];
+        if (el) el.innerHTML = `<span class="${m.cls}">${m.label}</span> [<span class="${m.cls}">${'█'.repeat(BAR)}</span>] 100%  ${m.totalEvals}/${m.totalEvals} evals  <span class="c-white">✓ ${r.acc.toFixed(2)}%</span>`;
+        finishLine();
+      }
+    }, 50);
+  });
+}
+
+// ── RESULTS TABLE ──
+function results(args) {
+  const which = args[0] || 'all';
+  const datasets = which === 'all' ? ['iris','heart','mnist'] : (RESULTS[which] ? [which] : ['iris','heart','mnist']);
+
+  datasets.forEach(ds => {
+    const data = RESULTS[ds];
+    const name = DS_NAMES[ds];
+    printLine(`${'═'.repeat(56)}`);
+    printRaw(`  <span class="c-header"> ${name} </span>`);
+    printLine(`${'─'.repeat(56)}`);
+    printRaw(`  <span class="c-dim">METHOD           ACC (%)       STD    EVALS  REDUC.</span>`);
+    printLine(`${'─'.repeat(56)}`);
+    const entries = [
+      { label:'Grid Search   ', key:'Grid Search',  cls:'bar-grid'  },
+      { label:'Random Search ', key:'Random Search', cls:'bar-rand'  },
+      { label:'Bayesian Opt  ', key:'Bayesian Opt',  cls:'bar-bayes' },
+      { label:'DP-HPO        ', key:'DP-HPO',        cls:'bar-dp'    },
+    ];
+    entries.forEach(e => {
+      const r = data[e.key];
+      const reduc = r.evals < 108 ? `-${((108-r.evals)/108*100).toFixed(0)}%` : ' —  ';
+      const isDp = e.key === 'DP-HPO';
+      const highlight = isDp ? 'c-bright' : '';
+      printRaw(`  <span class="${e.cls}">${e.label}</span>  <span class="${highlight}">${r.acc.toFixed(2).padStart(6)}%</span>   ±${r.std.toFixed(2).padEnd(5)}  ${String(r.evals).padStart(3)}    <span class="${highlight}">${reduc}</span>`);
+    });
+  });
+  printLine(`${'═'.repeat(56)}`);
+  printLine(`<span class="c-dim">Accuracy = mean ± std across 3 seeds (0,1,2)</span>`);
+}
+
+// ── ALGO (step through) ──
+let algoRunning = false, algoStepIdx = 0, algoCommitted = ['1','64','0.01','relu'];
+
+function algo() {
+  if (algoRunning) { printLine('Algorithm already running. Complete it first.', 'c-warn'); return; }
+  algoRunning = true;
+  algoStepIdx = 0;
+  algoCommitted = ['1','64','0.01','relu'];
+  printRaw(`<span class="c-bright">DP-HPO Algorithm — UCI Heart Disease (seed 0)</span>`);
+  printLine(`Search space: hidden_layers × neurons × lr × activation`);
+  printLine(`Defaults:     [1, 64, 0.01, relu]`);
+  printLine(`${'─'.repeat(60)}`);
+  printLine(`Type <span class="c-cyan">algo step</span> to advance, or <span class="c-cyan">algo run</span> to run all steps.`);
+}
+
+function algo_advance(all) {
+  if (!algoRunning) { printLine('Run <span class="c-cyan">algo</span> first to start.', 'c-warn'); return; }
+  if (algoStepIdx >= ALGO_STEPS.length) {
+    printLine(`<span class="c-bright">Algorithm complete.</span>`, 'c-bright');
+    printLine(`Final config: layers=${algoCommitted[0]}, neurons=${algoCommitted[1]}, lr=${algoCommitted[2]}, act=${algoCommitted[3]}`);
+    printLine(`Total evaluations: 10  (max possible: 13)`);
+    algoRunning = false;
+    return;
+  }
+
+  const doStep = (si) => {
+    const s = ALGO_STEPS[si];
+    printRaw(`\n<span class="c-warn">── DIMENSION ${si+1}/4: ${s.dim} ──</span>`);
+    s.vals.forEach((v, vi) => {
+      const isBest = vi === s.best_i;
+      const acc = s.accs[vi];
+      const bar = '█'.repeat(Math.round(acc/5));
+      const tag = isBest ? ' <span class="c-bright">← BEST</span>' : '';
+      printRaw(`  eval #${si*3+vi+1}  ${s.dim}=${v.padEnd(8)}  acc=${acc.toFixed(1).padStart(5)}%  <span class="${isBest?'bar-dp':'c-dim'}">${bar}</span>${tag}`);
+    });
+    algoCommitted[si] = s.best_v;
+    printRaw(`  <span class="c-bright">✓ Committed:</span> ${s.commit}   state=[${algoCommitted.join(', ')}]`);
+    algoStepIdx++;
+    if (algoStepIdx >= ALGO_STEPS.length) {
+      printLine(`\n<span class="c-bright">✓ Done. 10 evals. Type <span class="c-cyan">algo step</span> for summary.</span>`);
+    }
+  };
+
+  if (all) {
+    for (let i = algoStepIdx; i < ALGO_STEPS.length; i++) doStep(i);
+    printLine(`\n<span class="c-bright">All steps complete. Type <span class="c-cyan">algo step</span> for final summary.</span>`);
+  } else {
+    doStep(algoStepIdx);
+  }
+}
+
+// Override algo to handle subcommands
+COMMANDS['algo'] = function(args) {
+  if (!args[0]) { algo(); }
+  else if (args[0] === 'step') { algo_advance(false); }
+  else if (args[0] === 'run')  { algo_advance(true);  }
+  else { printLine(`Unknown subcommand. Use: algo | algo step | algo run`, 'c-warn'); }
+};
+
+// ── SEARCH SPACE ──
+function space() {
+  // DP-HPO evaluates 10 configs (with memoisation some overlap)
+  // dims: layers=[1,2,3] neurons=[32,64,128,256] lr=[0.001,0.01,0.1] act=[relu,tanh,logistic]
+  // defaults: layers=1, neurons=64, lr=0.01, act=relu
+  // dim0 sweep: (1,64,0.01,relu)(2,64,0.01,relu)(3,64,0.01,relu) best=2
+  // dim1 sweep: (2,32,0.01,relu)(2,64,0.01,relu)[cached](2,128,0.01,relu)(2,256,0.01,relu) best=128
+  // dim2 sweep: (2,128,0.001,relu)(2,128,0.01,relu)[cached](2,128,0.1,relu) best=0.01
+  // dim3 sweep: (2,128,0.01,relu)[cached](2,128,0.01,tanh)(2,128,0.01,logistic) best=relu
+  // unique evals = 10 (3+4+3+3 - 3 cache hits)
+
+  printRaw(`<span class="c-bright">Search Space Visualisation</span>  (108 total configs)`);
+  printLine(`${'─'.repeat(64)}`);
+  printRaw(`Legend:  <span class="bar-dp">█</span> = DP-HPO evaluated  <span class="c-warn">◆</span> = DP-HPO best  <span class="c-dim">·</span> = grid search only`);
+  printLine(`${'─'.repeat(64)}`);
+
+  const layers_vals = [1,2,3];
+  const neurons_vals = [32,64,128,256];
+  const lr_vals = [0.001,0.01,0.1];
+  const act_vals = ['relu','tanh','logistic'];
+
+  const dpEvals = new Set();
+  const dpBest = JSON.stringify([2,128,0.01,'relu']);
+  [[1,64,0.01,'relu'],[2,64,0.01,'relu'],[3,64,0.01,'relu'],
+   [2,32,0.01,'relu'],[2,64,0.01,'relu'],[2,128,0.01,'relu'],[2,256,0.01,'relu'],
+   [2,128,0.001,'relu'],[2,128,0.01,'relu'],[2,128,0.1,'relu'],
+   [2,128,0.01,'relu'],[2,128,0.01,'tanh'],[2,128,0.01,'logistic']
+  ].forEach(c => dpEvals.add(JSON.stringify(c)));
+
+  // Header
+  printRaw(`         ${'lr'.padEnd(7)}  ` + neurons_vals.map(n => String(n).padStart(3)).join('  '));
+  printLine(`         ${'─'.repeat(4)}     ` + neurons_vals.map(() => '───').join('  '));
+
+  act_vals.forEach(act => {
+    lr_vals.forEach(lr => {
+      let row = `  ${act.padEnd(8)} ${String(lr).padEnd(6)}  `;
+      neurons_vals.forEach(n => {
+        // pick best layer for display
+        let bestChar = '·';
+        for (const l of layers_vals) {
+          const key = JSON.stringify([l,n,lr,act]);
+          if (key === dpBest) { bestChar = '◆'; break; }
+          if (dpEvals.has(key)) { bestChar = '█'; }
+        }
+        const cls = bestChar === '◆' ? 'c-warn' : bestChar === '█' ? 'bar-dp' : 'c-dim';
+        row += `<span class="${cls}"> ${bestChar} </span> `;
+      });
+      printRaw(row);
+    });
+    printLine('');
+  });
+
+  printLine(`${'─'.repeat(64)}`);
+  printLine(`<span class="bar-dp">█</span>  Unique configs evaluated by DP-HPO: <span class="c-bright">10</span>`);
+  printLine(`<span class="c-dim">·</span>  Remaining configs (grid search only):  <span class="c-dim">98</span>`);
+  printLine(`<span class="c-warn">◆</span>  DP-HPO optimal config: layers=2, neurons=128, lr=0.01, relu`);
+}
+
+// ── COMPARE ASCII BAR CHART ──
+function compare() {
+  printRaw(`<span class="c-bright">Accuracy vs Evaluations — All Datasets</span>`);
+  printLine(`${'─'.repeat(64)}`);
+
+  const datasets = ['iris','heart','mnist'];
+  const methods  = [
+    { key:'Grid Search',  label:'Grid ', cls:'bar-grid'  },
+    { key:'Random Search',label:'Rand  ', cls:'bar-rand'  },
+    { key:'Bayesian Opt', label:'Bayes ', cls:'bar-bayes' },
+    { key:'DP-HPO',       label:'DP-HPO', cls:'bar-dp'    },
+  ];
+
+  datasets.forEach(ds => {
+    const name = DS_NAMES[ds];
+    printRaw(`\n  <span class="c-warn">${name}</span>`);
+    const data = RESULTS[ds];
+    const maxAcc = Math.max(...methods.map(m => data[m.key].acc));
+    methods.forEach(m => {
+      const r = data[m.key];
+      const barLen = Math.round((r.acc - (maxAcc - 15)) / 15 * 30);
+      const bar = '█'.repeat(Math.max(1, barLen));
+      const isDp = m.key === 'DP-HPO';
+      printRaw(`  <span class="${m.cls}">${m.label}</span>  <span class="${m.cls}">${bar.padEnd(32)}</span> <span class="${isDp?'c-bright':'c-white'}">${r.acc.toFixed(2)}% ±${r.std.toFixed(2)}</span>  [${r.evals} evals]${isDp?' <span class="c-bright">★</span>':''}`);
+    });
+  });
+
+  printLine(`\n${'─'.repeat(64)}`);
+  printLine(`<span class="c-bright">★ DP-HPO</span>: 90.7% fewer evaluations than grid search with competitive accuracy.`);
+  printLine(`   Accuracy gap: <span class="c-bright">1.47pp</span> (MNIST), <span class="c-bright">3.33pp</span> (Heart Disease)`);
+}
+
+// ══════════════════════════════════════════════════════════════ INPUT HANDLER
+inp.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (busy) return;
+    const val = inp.value;
+    inp.value = '';
+    handleCmd(val);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (histIdx < history.length - 1) { histIdx++; inp.value = history[histIdx]; }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (histIdx > 0) { histIdx--; inp.value = history[histIdx]; }
+    else { histIdx = -1; inp.value = ''; }
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const partial = inp.value.toLowerCase().trim();
+    const match = Object.keys(COMMANDS).find(c => c.startsWith(partial) && c !== partial);
+    if (match) inp.value = match;
+  } else if (e.key === 'l' && e.ctrlKey) {
+    e.preventDefault();
+    clear();
+  }
+});
+
+// Click anywhere to focus input
+document.addEventListener('click', () => inp.focus());
+
+// ══════════════════════════════════════════════════════════════ BOOT
+boot();
+</script>
+</body>
+</html>
