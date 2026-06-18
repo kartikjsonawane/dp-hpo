@@ -404,21 +404,22 @@ def hyperband_search(X_train, y_train, X_val, y_val,
         completed_trials.append((cfg, best_val_acc))
         return best_val_acc
 
+    # Pure Hyperband uses RANDOM sampling — the novelty is successive halving,
+    # not the sampler. Using TPE here would make it BOHB (a separate baseline).
     pruner  = optuna.pruners.HyperbandPruner(
         min_resource=1,
         max_resource=max_epochs,
         reduction_factor=reduction_factor,
     )
-    sampler = optuna.samplers.TPESampler(seed=random_state)
+    sampler = optuna.samplers.RandomSampler(seed=random_state)
     study   = optuna.create_study(
         direction="maximize",
         sampler=sampler,
         pruner=pruner,
     )
 
-    # n_trials: enough to let Hyperband explore multiple brackets.
-    # With reduction_factor=3 and max_epochs=100, Hyperband uses ~5 brackets.
     # 30 trials gives a reasonable budget comparable to other methods.
+    # With reduction_factor=3 and max_epochs=100, ~5 brackets are explored.
     study.optimize(objective, n_trials=30, show_progress_bar=False)
 
     best_trial  = study.best_trial
@@ -430,7 +431,6 @@ def hyperband_search(X_train, y_train, X_val, y_val,
         best_params["activation"],
     )
 
-    # Count completed (non-pruned) trials as "evaluations"
     n_complete = len([t for t in study.trials
                       if t.state == optuna.trial.TrialState.COMPLETE])
     n_pruned   = len([t for t in study.trials
@@ -440,14 +440,128 @@ def hyperband_search(X_train, y_train, X_val, y_val,
         "method":          "Hyperband",
         "config":          dict(zip(DIMS, best_cfg)),
         "accuracy":        study.best_value,
-        "n_evaluations":   len(study.trials),      # total trials attempted
-        "n_complete":      n_complete,              # trials run to convergence
-        "n_pruned":        n_pruned,                # trials pruned early
+        "n_evaluations":   len(study.trials),
+        "n_complete":      n_complete,
+        "n_pruned":        n_pruned,
         "time_seconds":    time.time() - t0,
     }
 
 
-# ── 6. Random Search (budget-matched, k=10) ───────────────────────────────────
+# ── 6. BOHB (Bayesian Optimisation + Hyperband) ──────────────────────────────
+def bohb_search(X_train, y_train, X_val, y_val,
+                max_epochs=100, reduction_factor=3, random_state=42):
+    """
+    BOHB: Bayesian Optimisation with Hyperband (Falkner et al., ICML 2018).
+
+    BOHB = HyperbandPruner (successive halving for early stopping) +
+           TPESampler (Tree-structured Parzen Estimator for smart sampling).
+
+    Vs. pure Hyperband (hyperband_search above): replaces random sampling
+    with TPE, so high-budget brackets focus on configurations the surrogate
+    model has identified as promising. This is the state-of-the-art
+    multi-fidelity baseline and the most competitive against DP-HPO.
+
+    Implementation: Optuna's native (TPE + HyperbandPruner) combination,
+    which replicates the BOHB design principle within our Optuna framework.
+    Full hpbandster requires ConfigSpace; this variant uses identical
+    successive-halving logic with equivalent Bayesian sampling.
+    """
+    import optuna
+    from tensorflow import keras
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    t0 = time.time()
+
+    n_features = X_train.shape[1]
+    n_classes  = len(np.unique(np.concatenate([y_train, y_val])))
+
+    def objective(trial):
+        hidden_layers = trial.suggest_categorical("hidden_layers", VALS[0])
+        neurons       = trial.suggest_categorical("neurons",       VALS[1])
+        learning_rate = trial.suggest_categorical("learning_rate", VALS[2])
+        activation    = trial.suggest_categorical("activation",    VALS[3])
+
+        import tensorflow as tf
+        tf.random.set_seed(random_state + trial.number)
+        np.random.seed(random_state + trial.number)
+
+        model = _build_model(hidden_layers, neurons, learning_rate, activation,
+                             n_features, n_classes)
+
+        best_val_acc   = 0.0
+        patience_count = 0
+
+        for epoch in range(max_epochs):
+            model.fit(
+                X_train, y_train,
+                validation_data=(X_val, y_val),
+                epochs=1,
+                batch_size=32,
+                verbose=0,
+            )
+
+            output = model(X_val, training=False)
+            if n_classes == 2:
+                probs = np.array(output).flatten()
+                preds = (probs > 0.5).astype(int)
+            else:
+                probs = np.array(output)
+                preds = np.argmax(probs, axis=1)
+            val_acc = float(np.mean(preds == y_val))
+
+            trial.report(val_acc, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+            if val_acc > best_val_acc:
+                best_val_acc   = val_acc
+                patience_count = 0
+            else:
+                patience_count += 1
+                if patience_count >= 10:
+                    break
+
+        return best_val_acc
+
+    # BOHB: TPE sampler (Bayesian) + Hyperband pruner (successive halving)
+    pruner  = optuna.pruners.HyperbandPruner(
+        min_resource=1,
+        max_resource=max_epochs,
+        reduction_factor=reduction_factor,
+    )
+    sampler = optuna.samplers.TPESampler(seed=random_state)
+    study   = optuna.create_study(
+        direction="maximize",
+        sampler=sampler,
+        pruner=pruner,
+    )
+    study.optimize(objective, n_trials=30, show_progress_bar=False)
+
+    best_params = study.best_trial.params
+    best_cfg    = (
+        best_params["hidden_layers"],
+        best_params["neurons"],
+        best_params["learning_rate"],
+        best_params["activation"],
+    )
+
+    n_complete = len([t for t in study.trials
+                      if t.state == optuna.trial.TrialState.COMPLETE])
+    n_pruned   = len([t for t in study.trials
+                      if t.state == optuna.trial.TrialState.PRUNED])
+
+    return {
+        "method":          "BOHB",
+        "config":          dict(zip(DIMS, best_cfg)),
+        "accuracy":        study.best_value,
+        "n_evaluations":   len(study.trials),
+        "n_complete":      n_complete,
+        "n_pruned":        n_pruned,
+        "time_seconds":    time.time() - t0,
+    }
+
+
+# ── 7. Random Search (budget-matched, k=10) ───────────────────────────────────
 def random_search_k10(X_train, y_train, X_val, y_val, random_state=42):
     """
     Random Search with k=10 — budget-matched to DP-HPO (~10 evaluations).
@@ -488,44 +602,44 @@ def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
           committed[i] <- argmax_v acc
       return committed
 
-    Unique evaluations = 1 + sum(|H_i| - 1) = 10  (90.7% reduction vs grid).
+    Unique evaluations = 1 + sum(|H_i| - 1) = 1 + (2+3+2+2) = 10 (Proposition 1).
 
     Parameters
     ----------
     order : list of int or None
-        Dimension commitment order. None uses [0,1,2,3].
-        Use marginal_variances() from theory.py for importance-first order
-        (Lemma 2: minimises expected optimality gap).
-
-    Returns
-    -------
-    dict with keys: method, config, accuracy, n_evaluations, time_seconds
+        Dimension evaluation order. None = default [0, 1, 2, 3].
+        Pass a permutation for ablation A1 (Lemma 2 validation).
     """
-    if order is None:
-        order = list(range(len(DIMS)))
+    import tensorflow as tf
+    tf.random.set_seed(random_state)
+    np.random.seed(random_state)
 
-    memo      = {}
+    t0    = time.time()
+    memo  = {}
+    order = order if order is not None else list(range(len(DIMS)))
+
     committed = list(DEFAULTS)
-    t0        = time.time()
-    best_acc  = -1
 
-    for i in order:
-        best_val = committed[i]
-        for v in VALS[i]:
-            cfg = list(committed)
-            cfg[i] = v
-            # All uncommitted dimensions use DEFAULTS (ADP approximation)
+    for dim_idx in order:
+        best_val  = None
+        best_acc  = -1.0
+        for v in VALS[dim_idx]:
+            config           = list(committed)
+            config[dim_idx]  = v
+            # Uncommitted dims stay at DEFAULTS
             for j in range(len(DIMS)):
-                if j not in order[:order.index(i) + 1]:
-                    cfg[j] = DEFAULTS[j]
-            acc = _evaluate(tuple(cfg), X_train, y_train, X_val, y_val,
+                if j != dim_idx and config[j] == DEFAULTS[j]:
+                    config[j] = DEFAULTS[j]
+            acc = _evaluate(tuple(config),
+                            X_train, y_train, X_val, y_val,
                             memo, random_state)
             if acc > best_acc:
-                best_acc, best_val = acc, v
-        committed[i] = best_val
+                best_acc = acc
+                best_val = v
+        committed[dim_idx] = best_val
 
     return {
-        "method":        "DP-HPO (Proposed)",
+        "method":        "DP-HPO",
         "config":        dict(zip(DIMS, committed)),
         "accuracy":      best_acc,
         "n_evaluations": len(memo),
@@ -533,6 +647,7 @@ def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
     }
 
 
+# ── Backward-compatible alias ─────────────────────────────────────────────────
 def dp_hpo_ordered(X_train, y_train, X_val, y_val, order=None, random_state=42):
     """
     DP-HPO with a custom dimension ordering -- convenience wrapper for
@@ -550,11 +665,22 @@ def dp_hpo_ordered(X_train, y_train, X_val, y_val, order=None, random_state=42):
 # ── Convenience wrapper ───────────────────────────────────────────────────────
 def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
     """
-    Run all five HPO methods and return a dict of results.
+    Run all 8 HPO methods and return a dict of results.
 
     Each method uses its own isolated memo cache so wall-clock time and
     evaluation counts reflect independent runs (V2 fix: V1 shared the cache,
     which confounded time comparisons between methods).
+
+    Methods
+    -------
+    1. Grid Search            -- exhaustive, 108 evals
+    2. Random Search (k=20)   -- random, 20 evals
+    3. Random Search (k=10)   -- random, budget-matched to DP-HPO (10 evals)
+    4. Bayesian Opt           -- GP surrogate, 20 evals
+    5. Optuna (TPE)           -- tree Parzen estimator, 20 trials
+    6. Hyperband              -- random + successive halving, 30 trials
+    7. BOHB                   -- TPE + successive halving, 30 trials
+    8. DP-HPO (Proposed)      -- approximate DP, 10 evals
 
     Returns
     -------
@@ -576,6 +702,9 @@ def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
                                     X_train, y_train, X_val, y_val,
                                     n_trials=20, random_state=random_state),
         "Hyperband":            lambda: hyperband_search(
+                                    X_train, y_train, X_val, y_val,
+                                    random_state=random_state),
+        "BOHB":                 lambda: bohb_search(
                                     X_train, y_train, X_val, y_val,
                                     random_state=random_state),
         "DP-HPO (Proposed)":    lambda: dp_hpo(
