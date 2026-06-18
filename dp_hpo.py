@@ -561,7 +561,122 @@ def bohb_search(X_train, y_train, X_val, y_val,
     }
 
 
-# ── 7. Random Search (budget-matched, k=10) ───────────────────────────────────
+# ── 7. SMAC (Sequential Model-based Algorithm Configuration) ─────────────────
+def smac_search(X_train, y_train, X_val, y_val,
+                n_calls=20, n_init=5, random_state=42):
+    """
+    SMAC: Sequential Model-based Algorithm Configuration (Hutter et al., 2011).
+
+    Core algorithm:
+      1. Evaluate n_init randomly sampled configurations (initial design).
+      2. Fit a Random Forest surrogate on observed (config → accuracy) pairs.
+      3. Select next config by maximising Expected Improvement (EI) over the
+         surrogate's predicted distribution (mean + uncertainty from RF trees).
+      4. Evaluate the selected config; add to observations. Repeat until budget.
+
+    Key difference from Bayesian Opt (bayesian_optimisation above):
+      - Bayesian Opt uses a Gaussian Process surrogate (smooth, exact uncertainty)
+      - SMAC uses a Random Forest surrogate (handles categoricals natively,
+        scales better, more robust on irregular spaces)
+
+    This is a faithful implementation of the SMAC algorithm principle using
+    sklearn's RandomForestRegressor without the SMAC3 ConfigSpace dependency,
+    keeping it reproducible and self-contained.
+
+    Reference: Hutter, Hoos & Leyton-Brown (2011). Sequential Model-Based
+    Optimization for General Algorithm Configuration. LION.
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    import itertools
+
+    t0   = time.time()
+    memo = {}
+    rng  = np.random.RandomState(random_state)
+
+    # Encode search space as integer indices for the RF
+    # config -> feature vector [hidden_layers_idx, neurons_idx, lr_idx, act_idx]
+    def cfg_to_vec(cfg):
+        return [VALS[i].index(cfg[i]) for i in range(len(DIMS))]
+
+    def vec_to_cfg(vec):
+        return tuple(VALS[i][int(v)] for i, v in enumerate(vec))
+
+    all_vecs   = [cfg_to_vec(list(c)) for c in ALL_CONFIGS]  # 108 candidate vectors
+    best_acc   = -1.0
+    best_cfg   = None
+    X_obs      = []   # observed feature vectors
+    y_obs      = []   # observed accuracies
+
+    # ── Phase 1: random initial design ───────────────────────────────────────
+    init_idxs = rng.choice(len(ALL_CONFIGS), size=min(n_init, len(ALL_CONFIGS)),
+                           replace=False)
+    for idx in init_idxs:
+        cfg = ALL_CONFIGS[idx]
+        acc = _evaluate(cfg, X_train, y_train, X_val, y_val, memo, random_state)
+        X_obs.append(cfg_to_vec(list(cfg)))
+        y_obs.append(acc)
+        if acc > best_acc:
+            best_acc, best_cfg = acc, cfg
+
+    # ── Phase 2: model-based acquisition ─────────────────────────────────────
+    evaluated_set = set(init_idxs.tolist())
+    remaining     = n_calls - n_init
+
+    for _ in range(remaining):
+        if len(X_obs) < 2:
+            # Not enough data to fit RF; fall back to random
+            remaining_idxs = [i for i in range(len(ALL_CONFIGS))
+                              if i not in evaluated_set]
+            if not remaining_idxs:
+                break
+            idx = rng.choice(remaining_idxs)
+        else:
+            # Fit Random Forest surrogate
+            rf = RandomForestRegressor(
+                n_estimators=10,
+                random_state=random_state,
+                n_jobs=1,
+            )
+            rf.fit(np.array(X_obs), np.array(y_obs))
+
+            # Expected Improvement over all un-evaluated candidates
+            remaining_idxs = [i for i in range(len(ALL_CONFIGS))
+                              if i not in evaluated_set]
+            if not remaining_idxs:
+                break
+
+            cand_vecs = np.array([all_vecs[i] for i in remaining_idxs])
+
+            # Per-tree predictions → mean + std (RF uncertainty)
+            tree_preds = np.array([tree.predict(cand_vecs)
+                                   for tree in rf.estimators_])
+            mu  = tree_preds.mean(axis=0)
+            std = tree_preds.std(axis=0) + 1e-9
+
+            # EI(x) = (mu - f_best) * Phi(z) + std * phi(z), z = (mu - f_best)/std
+            from scipy.stats import norm as _norm
+            z  = (mu - best_acc) / std
+            ei = (mu - best_acc) * _norm.cdf(z) + std * _norm.pdf(z)
+            idx = remaining_idxs[int(np.argmax(ei))]
+
+        evaluated_set.add(idx)
+        cfg = ALL_CONFIGS[idx]
+        acc = _evaluate(cfg, X_train, y_train, X_val, y_val, memo, random_state)
+        X_obs.append(cfg_to_vec(list(cfg)))
+        y_obs.append(acc)
+        if acc > best_acc:
+            best_acc, best_cfg = acc, cfg
+
+    return {
+        "method":        "SMAC",
+        "config":        dict(zip(DIMS, best_cfg)),
+        "accuracy":      best_acc,
+        "n_evaluations": len(memo),
+        "time_seconds":  time.time() - t0,
+    }
+
+
+# ── 8. Random Search (budget-matched, k=10) ───────────────────────────────────
 def random_search_k10(X_train, y_train, X_val, y_val, random_state=42):
     """
     Random Search with k=10 — budget-matched to DP-HPO (~10 evaluations).
@@ -579,7 +694,8 @@ def random_search_k10(X_train, y_train, X_val, y_val, random_state=42):
                          k=10, random_state=random_state)
 
 
-# ── 7. DP-HPO (Proposed) ─────────────────────────────────────────────────────
+
+# ── 9. DP-HPO (Proposed) ─────────────────────────────────────────────────────
 def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
     """
     DP-HPO: Approximate Dynamic Programming for Hyperparameter Optimisation.
@@ -593,7 +709,7 @@ def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
     hyperparameter dimensions, V_hat = V* (exact DP). In the general case,
     the approximation error is bounded by (d-1)*epsilon (Theorem 1, theory.py).
 
-    Algorithm (see theory.py Algorithm 1 for full pseudocode):
+    Algorithm:
       committed <- DEFAULTS
       for each dimension i in `order`:
           for each candidate v in VALS[i]:
@@ -612,7 +728,8 @@ def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
     """
     import tensorflow as tf
     tf.random.set_seed(random_state)
-    np.random.seed(random_state)
+    import numpy as _np
+    _np.random.seed(random_state)
 
     t0    = time.time()
     memo  = {}
@@ -621,15 +738,11 @@ def dp_hpo(X_train, y_train, X_val, y_val, order=None, random_state=42):
     committed = list(DEFAULTS)
 
     for dim_idx in order:
-        best_val  = None
-        best_acc  = -1.0
+        best_val = None
+        best_acc = -1.0
         for v in VALS[dim_idx]:
-            config           = list(committed)
-            config[dim_idx]  = v
-            # Uncommitted dims stay at DEFAULTS
-            for j in range(len(DIMS)):
-                if j != dim_idx and config[j] == DEFAULTS[j]:
-                    config[j] = DEFAULTS[j]
+            config          = list(committed)
+            config[dim_idx] = v
             acc = _evaluate(tuple(config),
                             X_train, y_train, X_val, y_val,
                             memo, random_state)
@@ -665,7 +778,7 @@ def dp_hpo_ordered(X_train, y_train, X_val, y_val, order=None, random_state=42):
 # ── Convenience wrapper ───────────────────────────────────────────────────────
 def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
     """
-    Run all 8 HPO methods and return a dict of results.
+    Run all 9 HPO methods and return a dict of results.
 
     Each method uses its own isolated memo cache so wall-clock time and
     evaluation counts reflect independent runs (V2 fix: V1 shared the cache,
@@ -680,7 +793,8 @@ def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
     5. Optuna (TPE)           -- tree Parzen estimator, 20 trials
     6. Hyperband              -- random + successive halving, 30 trials
     7. BOHB                   -- TPE + successive halving, 30 trials
-    8. DP-HPO (Proposed)      -- approximate DP, 10 evals
+    8. SMAC                   -- RF surrogate + EI acquisition, 20 evals
+    9. DP-HPO (Proposed)      -- approximate DP, 10 evals
 
     Returns
     -------
@@ -707,6 +821,9 @@ def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
         "BOHB":                 lambda: bohb_search(
                                     X_train, y_train, X_val, y_val,
                                     random_state=random_state),
+        "SMAC":                 lambda: smac_search(
+                                    X_train, y_train, X_val, y_val,
+                                    n_calls=20, random_state=random_state),
         "DP-HPO (Proposed)":    lambda: dp_hpo(
                                     X_train, y_train, X_val, y_val,
                                     random_state=random_state),

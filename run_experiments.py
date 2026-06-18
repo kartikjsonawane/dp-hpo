@@ -50,7 +50,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.datasets import load_breast_cancer
 
 from dp_hpo import (run_all_methods, dp_hpo, dp_hpo_ordered,
-                    hyperband_search, bohb_search, random_search_k10,
+                    hyperband_search, bohb_search, smac_search, random_search_k10,
                     DIMS, VALS, DEFAULTS)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -326,7 +326,7 @@ print("Bonferroni correction: α_adj = 0.05 / (4 baselines × datasets)")
 print("="*65)
 
 all_results    = {}
-N_BASELINES    = 7   # Grid Search, Random (k=20), Random (k=10), Bayesian Opt, Optuna, Hyperband, BOHB
+N_BASELINES    = 8   # Grid Search, Random (k=20), Random (k=10), Bayesian Opt, Optuna, Hyperband, BOHB, SMAC
 
 for ds_name, (loader, subsample, desc) in DATASET_CONFIG.items():
     print(f"\n{'='*65}")
@@ -338,7 +338,8 @@ for ds_name, (loader, subsample, desc) in DATASET_CONFIG.items():
     print(f"  Shape: {X.shape}  Classes: {len(np.unique(y))}")
 
     methods_list = ["Grid Search", "Random Search (k=20)", "Random Search (k=10)",
-                    "Bayesian Opt", "Optuna (TPE)", "Hyperband", "BOHB", "DP-HPO (Proposed)"]
+                    "Bayesian Opt", "Optuna (TPE)", "Hyperband", "BOHB", "SMAC",
+                    "DP-HPO (Proposed)"]
     ds_results   = {m: {"accs": [], "evals": [], "times": []} for m in methods_list}
 
     for seed in SEEDS:
@@ -370,7 +371,7 @@ for ds_name, (loader, subsample, desc) in DATASET_CONFIG.items():
     gc_accs   = ds_results["DP-HPO (Proposed)"]["accs"]
     sig_results = {}
     for method in ["Grid Search", "Random Search (k=20)", "Random Search (k=10)",
-                   "Bayesian Opt", "Optuna (TPE)", "Hyperband", "BOHB"]:
+                   "Bayesian Opt", "Optuna (TPE)", "Hyperband", "BOHB", "SMAC"]:
         if ds_results[method]["accs"]:
             r = wilcoxon_test(gc_accs, ds_results[method]["accs"],
                               name_a="GC-HPO", name_b=method,
@@ -425,4 +426,5 @@ output = {
 with open("results_v2.json", "w") as f:
     json.dump(output, f, indent=2)
 
-print("Run python theory.py to verify Theorem 1 gap bound.")
+print("All results saved to results_v2.json")
+print("Run: python theory.py  to verify Theorem 1 gap bound.")
