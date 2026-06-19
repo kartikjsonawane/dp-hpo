@@ -167,12 +167,9 @@ dp-hpo/
 ## Citation
 
 ```bibtex
-@article{sonawane2026dphpo,
-  title   = {Approximate Dynamic Programming for Neural Network Hyperparameter Optimisation},
-  author  = {Sonawane, Kartik},
-  year    = {2026},
-  url     = {https://github.com/kartikjsonawane/dp-hpo}
-}
-```
-
-MIT License © 2026 Kartik Sonawane
+@misc{sonawane2026dphpo,
+  title     = {DP-HPO: Approximate Dynamic Programming for Neural Network Hyperparameter Optimisation with Evaluation Caching},
+  author    = {Sonawane, Kartik},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.20760182},
