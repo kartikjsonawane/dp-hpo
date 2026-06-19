@@ -3,7 +3,8 @@
 > **10 evaluations. Within 0.5% of exhaustive grid search accuracy. 90.7% fewer model evaluations.**
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://python.org)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-CC--BY--4.0-green)](https://creativecommons.org/licenses/by/4.0/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20760182.svg)](https://doi.org/10.5281/zenodo.20760182)
 [![GitHub Pages](https://img.shields.io/badge/demo-live-brightgreen)](https://kartikjsonawane.github.io/dp-hpo/)
 [![Seeds](https://img.shields.io/badge/seeds-25-orange)](results_v2.json)
 
@@ -169,8 +170,4 @@ dp-hpo/
 ```bibtex
 @misc{sonawane2026dphpo,
   title     = {DP-HPO: Approximate Dynamic Programming
-               for Neural Network Hyperparameter Optimisation
-               with Evaluation Caching},
-  author    = {Sonawane, Kartik},
-  year      = {2026},
-  publis
+              
