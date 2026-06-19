@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-CC--BY--4.0-green)](https://creativecommons.org/licenses/by/4.0/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20760182.svg)](https://doi.org/10.5281/zenodo.20760182)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20760182-blue)](https://doi.org/10.5281/zenodo.20760182)
 [![GitHub Pages](https://img.shields.io/badge/demo-live-brightgreen)](https://kartikjsonawane.github.io/dp-hpo/)
 [![Seeds](https://img.shields.io/badge/seeds-25-orange)](results_v2.json)
 
@@ -169,4 +169,19 @@ dp-hpo/
 
 ```bibtex
 @misc{sonawane2026dphpo,
-  title     = {DP-HPO: Approximate Dynamic Programming for Neural Net
+  title     = {DP-HPO: Approximate Dynamic Programming for Neural Network Hyperparameter Optimisation with Evaluation Caching},
+  author    = {Sonawane, Kartik},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.20760182},
+  url       = {https://doi.org/10.5281/zenodo.20760182}
+}
+```
+
+## License
+
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+
+This work is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+
+© 2026 Kartik Sonawane · Published via [Zenodo](https://doi.org/10.5281/zenodo.20760182)
