@@ -168,8 +168,9 @@ dp-hpo/
 
 ```bibtex
 @misc{sonawane2026dphpo,
-  title     = {DP-HPO: Approximate Dynamic Programming for Neural Network Hyperparameter Optimisation with Evaluation Caching},
+  title     = {DP-HPO: Approximate Dynamic Programming
+               for Neural Network Hyperparameter Optimisation
+               with Evaluation Caching},
   author    = {Sonawane, Kartik},
   year      = {2026},
-  publisher = {Zenodo},
-  doi       = 
+  publis
