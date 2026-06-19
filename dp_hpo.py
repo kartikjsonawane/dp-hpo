@@ -39,15 +39,17 @@ Unique evaluations = 1 + sum(|H_i| - 1) = 1 + (2+3+2+2) = 10
 Grid search        = prod(|H_i|)         = 3x4x3x3       = 108
 Evaluation reduction                                      = 90.7%
 
-Seven HPO methods
------------------
+Nine HPO methods
+----------------
   1. Grid Search           -- exhaustive,        O(prod(n_i))  = 108 evaluations
   2. Random Search (k=20)  -- stochastic,        O(k)          =  20 evaluations
   3. Random Search (k=10)  -- budget-matched,    O(k)          =  10 evaluations
   4. Bayesian Opt          -- GP surrogate,      O(k)          =  20 evaluations
   5. Optuna (TPE)          -- tree-structured,   O(k)          =  20 evaluations
-  6. Hyperband             -- multi-fidelity,    adaptive      = ~10-30 trials
-  7. DP-HPO (Proposed)     -- approximate DP,    O(sum(n_i))   =  10 evaluations
+  6. Hyperband             -- multi-fidelity,    adaptive      = ~30 trials
+  7. BOHB                  -- Bayesian+Hyperband, adaptive     = ~30 trials
+  8. SMAC                  -- RF surrogate+EI,   O(k)          =  20 evaluations
+  9. DP-HPO (Proposed)     -- approximate DP,    O(sum(n_i))   =  10 evaluations
 
 See theory.py for: MDP formulation, Theorem 1 (gap bound), Lemma 2 (ordering).
 
@@ -833,7 +835,4 @@ def run_all_methods(X_train, y_train, X_val, y_val, random_state=42):
     for name, fn in methods.items():
         print(f"    Running {name} ...", flush=True)
         results[name] = fn()
-        r = results[name]
-        print(f"      acc={r['accuracy']:.4f}  evals={r['n_evaluations']}"
-              f"  time={r['time_seconds']:.1f}s")
-    return results
+        r = result
