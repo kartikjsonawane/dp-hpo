@@ -1,6 +1,6 @@
 # DP-HPO: Approximate Dynamic Programming for Neural Network HPO
 
-> **10 evaluations. 98.28% accuracy. No statistical difference from exhaustive 108-config grid search.**
+> **10 evaluations. Within 0.5% of exhaustive grid search accuracy. 90.7% fewer model evaluations.**
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -25,7 +25,7 @@ Stage 4: sweep activation    ∈ {relu, tanh, logit} → commit best (3 evals)
                                                       TOTAL: 10 evals (+ 1 cached)
 ```
 
-**Result:** 90.7% fewer evaluations. No statistically significant accuracy loss (Wilcoxon+Bonferroni, α_adj = 0.00156).
+**Result:** 90.7% fewer evaluations. DP-HPO stays within 0.5% of grid search accuracy across all four benchmark datasets.
 
 ---
 
@@ -125,7 +125,7 @@ For GPU runs, open a split Colab notebook from `notebooks/` and download the par
 
 ```bash
 python merge_results.py   # merge 4 partial JSONs → results_v2.json
-python fill_results.py    # fill DP_HPO_V2_Paper_FINAL.docx
+python fill_results.py    # fill manuscript tables
 ```
 
 ---
@@ -139,11 +139,11 @@ dp-hpo/
 ├── theory.py               # Theorem 1 verifier
 ├── fill_results.py         # auto-fill manuscript tables
 ├── merge_results.py        # merge split Colab results
-├── results_v2.json         # 25-seed results (UCI Breast Cancer done)
-├── DP_HPO_V2_Paper_FINAL.docx
+├── results_v2.json         # 25-seed results (all 4 datasets)
+├── dp-hpo.pdf              # published paper (DOI: 10.5281/zenodo.20760182)
 ├── requirements.txt
 ├── notebooks/              # Colab/Kaggle notebooks (one per dataset)
-└── docs/index.html         # GitHub Pages — live demo + dashboard
+└── index.html              # GitHub Pages — live demo + dashboard
 ```
 
 ---
@@ -172,4 +172,4 @@ dp-hpo/
   author    = {Sonawane, Kartik},
   year      = {2026},
   publisher = {Zenodo},
-  doi       = {10.5281/zenodo.20760182},
+  doi       = 
