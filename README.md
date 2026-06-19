@@ -169,5 +169,4 @@ dp-hpo/
 
 ```bibtex
 @misc{sonawane2026dphpo,
-  title     = {DP-HPO: Approximate Dynamic Programming
-              
+  title     = {DP-HPO: Approximate Dynamic Programming for Neural Net
